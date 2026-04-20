@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Colors, Spacing, Radius, FontSize, FontWeight, Shadow } from '@/constants/theme';
-import { SyncProgress } from '@/services/syncOrchestrator';
+import { SyncProgress } from '@/services/contactSyncService';
 
 interface SyncProgressModalProps {
   visible: boolean;
@@ -24,10 +24,12 @@ const STATUS_LABELS: Record<string, string> = {
   requesting_permission: 'طلب إذن الوصول لجهات الاتصال...',
   permission_denied: 'تم رفض الإذن',
   reading_contacts: 'قراءة جهات الاتصال...',
-  processing: 'معالجة البيانات...',
+  processing: 'معالجة جهات الاتصال...',
   uploading: 'حفظ البيانات في قاعدة البيانات...',
   done: 'اكتملت المزامنة!',
   error: 'حدث خطأ',
+  web_picker: 'اختيار جهات الاتصال...',
+  web_file_import: 'استيراد ملف جهات الاتصال...',
 };
 
 const STATUS_ICONS: Record<string, keyof typeof MaterialIcons.glyphMap> = {
@@ -39,13 +41,15 @@ const STATUS_ICONS: Record<string, keyof typeof MaterialIcons.glyphMap> = {
   uploading: 'cloud-upload',
   done: 'check-circle',
   error: 'error-outline',
+  web_picker: 'contacts',
+  web_file_import: 'upload-file',
 };
 
 export function SyncProgressModal({ visible, progress, onClose }: SyncProgressModalProps) {
   const rotation = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.85)).current;
 
-  const isSpinning = ['idle', 'requesting_permission', 'reading_contacts', 'processing', 'uploading'].includes(
+  const isSpinning = ['idle', 'requesting_permission', 'reading_contacts', 'processing', 'uploading', 'web_picker', 'web_file_import'].includes(
     progress.status
   );
   const isDone = progress.status === 'done';
@@ -103,12 +107,7 @@ export function SyncProgressModal({ visible, progress, onClose }: SyncProgressMo
               <MaterialIcons
                 name={STATUS_ICONS[progress.status] ?? 'sync'}
                 size={32}
-                color={
-                  isDone ? Colors.accent
-                  : isError ? Colors.error
-                  : isPermDenied ? Colors.warning
-                  : Colors.primary
-                }
+                color={isDone ? Colors.accent : isError ? Colors.error : isPermDenied ? Colors.warning : Colors.primary}
               />
             )}
           </View>
@@ -118,8 +117,18 @@ export function SyncProgressModal({ visible, progress, onClose }: SyncProgressMo
             {STATUS_LABELS[progress.status] ?? '...'}
           </Text>
 
-          {/* Progress bar (reading/processing/uploading) */}
-          {(progress.status === 'uploading' || progress.status === 'processing' || progress.status === 'reading_contacts') && progress.total > 0 ? (
+          {/* Web file import hint */}
+          {progress.status === 'web_file_import' ? (
+            <View style={[styles.infoNote, { backgroundColor: '#EEF2FF', borderColor: Colors.border }]}>
+              <MaterialIcons name="info-outline" size={16} color={Colors.primary} />
+              <Text style={[styles.infoText, { color: Colors.primary }]}>
+                اختر ملف جهات الاتصال بصيغة vCard (.vcf) أو CSV من جهازك
+              </Text>
+            </View>
+          ) : null}
+
+          {/* Progress bar */}
+          {(progress.status === 'uploading' || progress.status === 'processing') && progress.total > 0 ? (
             <View style={styles.progressWrap}>
               <View style={styles.progressBg}>
                 <View style={[styles.progressFill, { width: `${progressPercent}%` }]} />
@@ -131,47 +140,27 @@ export function SyncProgressModal({ visible, progress, onClose }: SyncProgressMo
             </View>
           ) : null}
 
-          {/* Upload sub-stats */}
-          {progress.status === 'uploading' && progress.total > 0 ? (
-            <View style={styles.uploadStats}>
-              <Text style={styles.uploadStatText}>
-                تم الرفع: <Text style={styles.uploadStatNum}>{progress.uploaded.toLocaleString('ar')}</Text>
-              </Text>
-              {progress.skipped > 0 ? (
-                <Text style={styles.uploadStatText}>
-                  تم التخطي: <Text style={styles.uploadStatNum}>{progress.skipped.toLocaleString('ar')}</Text>
-                </Text>
-              ) : null}
-            </View>
-          ) : null}
-
           {/* Done summary */}
           {isDone ? (
             <View style={styles.summaryRow}>
               <View style={styles.summaryItem}>
-                <Text style={styles.summaryNum}>{progress.total.toLocaleString('ar')}</Text>
-                <Text style={styles.summaryLbl}>جهة اتصال</Text>
-              </View>
-              <View style={styles.summaryDivider} />
-              <View style={styles.summaryItem}>
-                <Text style={styles.summaryNum}>{progress.uploaded.toLocaleString('ar')}</Text>
-                <Text style={styles.summaryLbl}>تم الرفع</Text>
+                <Text style={styles.summaryNum}>{progress.synced.toLocaleString('ar')}</Text>
+                <Text style={styles.summaryLbl}>جهة مزامنة</Text>
               </View>
               <View style={styles.summaryDivider} />
               <View style={styles.summaryItem}>
                 <Text style={styles.summaryNum}>{progress.skipped.toLocaleString('ar')}</Text>
-                <Text style={styles.summaryLbl}>تخطي</Text>
+                <Text style={styles.summaryLbl}>تم تخطيها</Text>
               </View>
             </View>
           ) : null}
 
-          {/* Permission denied note */}
+          {/* Permission denied */}
           {isPermDenied ? (
             <View style={[styles.infoNote, { backgroundColor: '#FFF3F3', borderColor: '#FFCDD2' }]}>
               <MaterialIcons name="lock" size={16} color={Colors.error} />
               <Text style={[styles.infoText, { color: Colors.error }]}>
-                لم يتم منح إذن الوصول لجهات الاتصال. يمكنك تفعيل الإذن من إعدادات الجهاز ثم
-                إعادة المزامنة.
+                لم يتم منح إذن الوصول لجهات الاتصال. يرجى تفعيل الإذن من إعدادات الجهاز ثم المحاولة مجدداً.
               </Text>
             </View>
           ) : null}
@@ -201,11 +190,7 @@ export function SyncProgressModal({ visible, progress, onClose }: SyncProgressMo
               style={({ pressed }) => [styles.closeBtn, pressed && { opacity: 0.8 }]}
             >
               <Text style={styles.closeBtnText}>
-                {isDone
-                  ? 'رائع، شكراً لمساهمتك!'
-                  : isPermDenied
-                  ? 'حسناً، ربما لاحقاً'
-                  : 'إغلاق'}
+                {isDone ? 'رائع، شكراً لمساهمتك!' : isPermDenied ? 'حسناً، ربما لاحقاً' : 'إغلاق'}
               </Text>
             </Pressable>
           ) : (
@@ -236,9 +221,12 @@ const styles = StyleSheet.create({
     ...Shadow.lg,
   },
   iconWrap: {
-    width: 72, height: 72, borderRadius: 36,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     backgroundColor: Colors.surfaceAlt,
-    justifyContent: 'center', alignItems: 'center',
+    justifyContent: 'center',
+    alignItems: 'center',
     marginBottom: Spacing.sm,
   },
   iconWrapSuccess: { backgroundColor: '#EFF8F2' },
@@ -256,9 +244,11 @@ const styles = StyleSheet.create({
     gap: Spacing.xs,
   },
   progressBg: {
-    width: '100%', height: 8,
+    width: '100%',
+    height: 8,
     backgroundColor: Colors.borderLight,
-    borderRadius: 4, overflow: 'hidden',
+    borderRadius: 4,
+    overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
@@ -270,38 +260,27 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.bold,
     color: Colors.primary,
   },
-  progressDetail: { fontSize: FontSize.sm, color: Colors.textMuted },
-  uploadStats: {
-    width: '100%',
-    alignItems: 'flex-end',
-    gap: 4,
-  },
-  uploadStatText: {
+  progressDetail: {
     fontSize: FontSize.sm,
-    color: Colors.textSecondary,
-    textAlign: 'right',
-  },
-  uploadStatNum: {
-    fontWeight: FontWeight.bold,
-    color: Colors.primary,
+    color: Colors.textMuted,
   },
   summaryRow: {
     flexDirection: 'row',
     backgroundColor: Colors.surfaceAlt,
     borderRadius: Radius.lg,
     paddingVertical: Spacing.md,
-    paddingHorizontal: Spacing.lg,
-    gap: Spacing.md,
+    paddingHorizontal: Spacing.xl,
+    gap: Spacing.xl,
     width: '100%',
     justifyContent: 'center',
   },
-  summaryItem: { alignItems: 'center', gap: 4, flex: 1 },
+  summaryItem: { alignItems: 'center', gap: 4 },
   summaryNum: {
     fontSize: FontSize.xl,
     fontWeight: FontWeight.bold,
     color: Colors.primary,
   },
-  summaryLbl: { fontSize: FontSize.xs, color: Colors.textMuted, textAlign: 'center' },
+  summaryLbl: { fontSize: FontSize.xs, color: Colors.textMuted },
   summaryDivider: {
     width: 1,
     backgroundColor: Colors.border,

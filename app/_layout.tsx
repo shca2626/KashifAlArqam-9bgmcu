@@ -14,13 +14,13 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <StatusBar style="light" />
         <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="index" options={{ headerShown: false }} />
-          <Stack.Screen name="onboarding" options={{ headerShown: false }} />
-          <Stack.Screen name="home" options={{ headerShown: false }} />
-          <Stack.Screen name="permissions" options={{ headerShown: false }} />
-          <Stack.Screen name="search-results" options={{ headerShown: false }} />
-          <Stack.Screen name="contact-details" options={{ headerShown: false }} />
-          <Stack.Screen name="moderation" options={{ headerShown: false }} />
+          <Stack.Screen name="index" />
+          <Stack.Screen name="permissions" />
+          <Stack.Screen name="home" />
+          <Stack.Screen name="search-results" />
+          <Stack.Screen name="contact-details" />
+          <Stack.Screen name="moderation" />
+          <Stack.Screen name="(tabs)" />
         </Stack>
       </SafeAreaProvider>
     </AlertProvider>
