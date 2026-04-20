@@ -7,7 +7,6 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Animated, Dimensions } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors, FontSize, FontWeight, Spacing } from '@/constants/theme';
@@ -52,11 +51,9 @@ export default function SplashScreen() {
       <View style={styles.bgCircle2} />
 
       <Animated.View style={[styles.logoWrap, { opacity: logoOpacity, transform: [{ scale: logoScale }] }]}>
-        <Image
-          source={require('@/assets/images/icon.png')}
-          style={styles.logo}
-          contentFit="contain"
-        />
+        <View style={styles.logoCircle}>
+          <Text style={styles.logoEmoji}>🔍</Text>
+        </View>
       </Animated.View>
 
       <Animated.View style={[styles.textWrap, { opacity: textOpacity }]}>
@@ -89,7 +86,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.04)',
   },
   logoWrap: { marginBottom: Spacing.xl },
-  logo: { width: 130, height: 130 },
+  logoCircle: {
+    width: 130, height: 130, borderRadius: 65,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  logoEmoji: { fontSize: 60 },
   textWrap: { alignItems: 'center' },
   appName: {
     fontSize: FontSize.xxxl,
