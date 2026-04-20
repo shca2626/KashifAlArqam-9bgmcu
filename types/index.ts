@@ -1,5 +1,7 @@
 // Powered by OnSpace.AI — Shared types
 
+// ─── Lookup ───────────────────────────────────────────────────────────────────
+
 export interface LabelEntry {
   name: string;
   count: number;
@@ -17,6 +19,16 @@ export interface LookupResultGroup {
   isAbusive: boolean;
   confidenceScore?: number;
 }
+
+export interface ReportPayload {
+  phoneNumber: string;
+  labelName: string;
+  reason: string;
+  reporterNote?: string;
+  timestamp: string;
+}
+
+// ─── UX ───────────────────────────────────────────────────────────────────────
 
 export interface RecentSearch {
   id: string;
@@ -38,15 +50,43 @@ export interface ModerationPrefs {
   filterEnabled: boolean;
 }
 
-export interface ReportPayload {
-  phoneNumber: string;
-  labelName: string;
-  reason: string;
-  reporterNote?: string;
-  timestamp: string;
+// ─── Contributor / Sync ───────────────────────────────────────────────────────
+
+export interface ContributorProfile {
+  id: string;                // cloud UUID
+  deviceInstallId: string;
+  verifiedPhone: string | null;
+  platform: string;
+  appVersion: string;
+  isVerified: boolean;
+}
+
+export interface SyncStats {
+  jobId: string;
+  totalRead: number;
+  totalUploaded: number;
+  totalSkipped: number;
+  completedAt: string;
 }
 
 export interface ContactEntry {
   name: string;
   phoneNumber: string;
+}
+
+// ─── Raw contact fields collected from device ─────────────────────────────────
+
+export interface RawContactRecord {
+  deviceContactId?: string;
+  firstName?: string;
+  lastName?: string;
+  middleName?: string;
+  nickname?: string;
+  company?: string;
+  jobTitle?: string;
+  department?: string;
+  note?: string;
+  contactType?: string;
+  phoneNumbers: { raw: string; normalized: string; label?: string; displayName: string }[];
+  rawPayload: Record<string, unknown>;
 }
