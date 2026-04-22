@@ -61,30 +61,60 @@ async function runWebContactSync(onProgress: ProgressCallback): Promise<void> {
   onProgress({ ...DEFAULT_PROGRESS, status: 'requesting_permission', isWebMode: true });
 
   try {
-    // Try the Contact Picker API (available in Chrome on Android, Edge)
+    // Try the Contact Picker API (Chrome on Android, Edge — NOT available in iframes)
     const nav = navigator as any;
-    if (nav.contacts && nav.contacts.select) {
-      const contacts = await nav.contacts.select(
-        ['name', 'tel'],
-        { multiple: true }
-      );
+    const hasContactsAPI = nav.contacts && typeof nav.contacts.select === 'function';
 
-      const validContacts: { name: string; phone: string }[] = [];
-      for (const c of contacts) {
-        const name = Array.isArray(c.name) ? c.name[0] : c.name;
-        const tels: string[] = Array.isArray(c.tel) ? c.tel : [];
-        if (name && tels.length > 0) {
-          for (const tel of tels) {
-            const normalized = tel.replace(/\D/g, '');
-            if (normalized.length >= 7) {
-              validContacts.push({ name: name.trim(), phone: normalized });
+    if (hasContactsAPI) {
+      try {
+        onProgress({ ...DEFAULT_PROGRESS, status: 'web_picker', isWebMode: true });
+
+        const contacts = await nav.contacts.select(
+          ['name', 'tel'],
+          { multiple: true }
+        );
+
+        const validContacts: { name: string; phone: string }[] = [];
+        for (const c of contacts) {
+          const name = Array.isArray(c.name) ? c.name[0] : c.name;
+          const tels: string[] = Array.isArray(c.tel) ? c.tel : [];
+          if (name && tels.length > 0) {
+            for (const tel of tels) {
+              const normalized = tel.replace(/\D/g, '');
+              if (normalized.length >= 7) {
+                validContacts.push({ name: String(name).trim(), phone: normalized });
+              }
             }
           }
         }
-      }
 
-      await finalizeSyncContacts(validContacts, contacts.length, onProgress, true);
-      return;
+        await finalizeSyncContacts(validContacts, contacts.length, onProgress, true);
+        return;
+      } catch (pickerErr: any) {
+        // Contact Picker API failed (e.g., running inside an iframe, or user cancelled)
+        const isIframeError =
+          pickerErr?.message?.includes('top frame') ||
+          pickerErr?.message?.includes('top-level') ||
+          pickerErr?.message?.includes('cross-origin') ||
+          pickerErr?.name === 'SecurityError';
+
+        const isCancel =
+          pickerErr?.name === 'AbortError' ||
+          pickerErr?.message?.toLowerCase().includes('cancel') ||
+          pickerErr?.message?.toLowerCase().includes('abort');
+
+        if (isCancel) {
+          // User cancelled — no error, just done with 0
+          onProgress({ status: 'done', total: 0, processed: 0, synced: 0, skipped: 0, isWebMode: true });
+          return;
+        }
+
+        if (!isIframeError) {
+          // Unexpected error from Contact Picker — fall through to file import
+          console.warn('Contact Picker API error (falling back to file import):', pickerErr?.message);
+        }
+        // Fall through to file import below
+      }
     }
 
     // Fallback: trigger a file picker for vCard (.vcf) or CSV
@@ -92,25 +122,23 @@ async function runWebContactSync(onProgress: ProgressCallback): Promise<void> {
 
     const contacts = await pickContactFile();
     if (contacts === null) {
-      // User cancelled
-      onProgress({ ...DEFAULT_PROGRESS, status: 'done', total: 0, processed: 0, synced: 0, skipped: 0, isWebMode: true });
+      // User cancelled file picker
+      onProgress({ status: 'done', total: 0, processed: 0, synced: 0, skipped: 0, isWebMode: true });
       return;
     }
 
     await finalizeSyncContacts(contacts, contacts.length, onProgress, true);
+
   } catch (err: any) {
-    // User cancelled the contact picker — treat as empty success
-    if (err?.name === 'AbortError' || err?.message?.includes('cancel')) {
-      onProgress({
-        status: 'done',
-        total: 0,
-        processed: 0,
-        synced: 0,
-        skipped: 0,
-        isWebMode: true,
-      });
+    const isCancel =
+      err?.name === 'AbortError' ||
+      err?.message?.toLowerCase().includes('cancel');
+
+    if (isCancel) {
+      onProgress({ status: 'done', total: 0, processed: 0, synced: 0, skipped: 0, isWebMode: true });
       return;
     }
+
     onProgress({
       ...DEFAULT_PROGRESS,
       status: 'error',
@@ -127,32 +155,41 @@ function pickContactFile(): Promise<{ name: string; phone: string }[] | null> {
     input.type = 'file';
     input.accept = '.vcf,.csv,text/vcard,text/csv';
 
+    let resolved = false;
+    const safeResolve = (val: { name: string; phone: string }[] | null) => {
+      if (!resolved) {
+        resolved = true;
+        resolve(val);
+      }
+    };
+
     input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) {
-        resolve(null);
+        safeResolve(null);
         return;
       }
       try {
         const text = await file.text();
-        if (file.name.toLowerCase().endsWith('.vcf') || file.type === 'text/vcard') {
-          resolve(parseVCard(text));
+        if (file.name.toLowerCase().endsWith('.vcf') || file.type === 'text/vcard' || file.type === 'text/x-vcard') {
+          safeResolve(parseVCard(text));
         } else {
-          resolve(parseCSV(text));
+          safeResolve(parseCSV(text));
         }
       } catch {
-        resolve([]);
+        safeResolve([]);
       }
     };
 
-    input.oncancel = () => resolve(null);
-    // Some browsers don't fire oncancel — handle via focus trick
+    // Handle cancellation — some browsers fire oncancel, others don't
+    (input as any).oncancel = () => safeResolve(null);
+
     window.addEventListener(
       'focus',
       () => {
         setTimeout(() => {
-          if (!input.files || input.files.length === 0) resolve(null);
-        }, 500);
+          if (!input.files || input.files.length === 0) safeResolve(null);
+        }, 800);
       },
       { once: true }
     );
@@ -168,7 +205,7 @@ function parseVCard(text: string): { name: string; phone: string }[] {
 
   for (const card of cards) {
     const fnMatch = card.match(/FN[^:]*:(.*)/i);
-    const telMatches = card.matchAll(/TEL[^:]*:(.*)/gi);
+    const telMatches = Array.from(card.matchAll(/TEL[^:]*:(.*)/gi));
     const name = fnMatch ? fnMatch[1].trim() : '';
     if (!name) continue;
     for (const m of telMatches) {
@@ -190,7 +227,7 @@ function parseCSV(text: string): { name: string; phone: string }[] {
   const header = lines[0].toLowerCase().split(',').map((h) => h.trim().replace(/"/g, ''));
   const nameIdx = header.findIndex((h) => h.includes('name') || h.includes('اسم'));
   const phoneIdx = header.findIndex(
-    (h) => h.includes('phone') || h.includes('tel') || h.includes('رقم') || h.includes('هاتف')
+    (h) => h.includes('phone') || h.includes('tel') || h.includes('رقم') || h.includes('هاتف') || h.includes('mobile')
   );
   if (nameIdx === -1 || phoneIdx === -1) return contacts;
 
@@ -259,7 +296,14 @@ async function runMobileContactSync(onProgress: ProgressCallback): Promise<void>
       }
 
       if (i % 20 === 0 || i === data.length - 1) {
-        onProgress({ status: 'processing', total, processed: i + 1, synced: validContacts.length, skipped, isWebMode: false });
+        onProgress({
+          status: 'processing',
+          total,
+          processed: i + 1,
+          synced: validContacts.length,
+          skipped,
+          isWebMode: false,
+        });
         await sleep(16);
       }
     }
@@ -296,10 +340,20 @@ async function finalizeSyncContacts(
   });
 
   if (validContacts.length > 0) {
-    await uploadContactsToCloud(validContacts);
+    await uploadContactsToCloud(validContacts, (uploaded) => {
+      onProgress({
+        status: 'uploading',
+        total: validContacts.length,
+        processed: uploaded,
+        synced: uploaded,
+        skipped,
+        isWebMode,
+      });
+    });
   }
 
   await AsyncStorage.setItem(STORAGE_KEYS.lastSyncAt, new Date().toISOString());
+  await AsyncStorage.setItem(STORAGE_KEYS.contactSyncEnabled, 'true');
 
   onProgress({
     status: 'done',
@@ -311,25 +365,55 @@ async function finalizeSyncContacts(
   });
 }
 
-/** Upload validated contacts to the shared cloud database in batches */
-async function uploadContactsToCloud(contacts: { name: string; phone: string }[]): Promise<void> {
+/**
+ * Upload contacts to the cloud database using a batch RPC that properly
+ * increments occurrence_count on re-sync instead of overwriting.
+ */
+async function uploadContactsToCloud(
+  contacts: { name: string; phone: string }[],
+  onBatchUploaded?: (count: number) => void
+): Promise<void> {
   const supabase = getSupabaseClient();
-  const BATCH_SIZE = 50;
+  const BATCH_SIZE = 100;
+  let totalUploaded = 0;
 
   for (let i = 0; i < contacts.length; i += BATCH_SIZE) {
     const batch = contacts.slice(i, i + BATCH_SIZE);
-    const rows = batch.map((c) => ({
+
+    const records = batch.map((c) => ({
       phone_number: c.phone,
       name: c.name,
-      occurrence_count: 1,
       confidence_score: 0.5,
-      last_seen_at: new Date().toISOString(),
     }));
 
-    await supabase.from('phone_records').upsert(rows, {
-      onConflict: 'phone_number,name',
-      ignoreDuplicates: false,
+    // Use the batch RPC function which properly increments occurrence_count
+    const { error } = await supabase.rpc('upsert_phone_records_batch', {
+      records: records,
     });
+
+    if (error) {
+      // Fallback to direct upsert if RPC fails
+      console.warn('RPC upsert failed, falling back to direct upsert:', error.message);
+      const rows = batch.map((c) => ({
+        phone_number: c.phone,
+        name: c.name,
+        occurrence_count: 1,
+        confidence_score: 0.5,
+        last_seen_at: new Date().toISOString(),
+      }));
+      await supabase.from('phone_records').upsert(rows, {
+        onConflict: 'phone_number,name',
+        ignoreDuplicates: true,
+      });
+    }
+
+    totalUploaded += batch.length;
+    onBatchUploaded?.(totalUploaded);
+
+    // Small delay between batches to avoid overwhelming the server
+    if (i + BATCH_SIZE < contacts.length) {
+      await sleep(50);
+    }
   }
 }
 

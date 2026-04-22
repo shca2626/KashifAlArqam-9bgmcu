@@ -131,12 +131,17 @@ export function SyncProgressModal({ visible, progress, onClose }: SyncProgressMo
           {(progress.status === 'uploading' || progress.status === 'processing') && progress.total > 0 ? (
             <View style={styles.progressWrap}>
               <View style={styles.progressBg}>
-                <View style={[styles.progressFill, { width: `${progressPercent}%` }]} />
+                <Animated.View style={[styles.progressFill, { width: `${Math.min(100, progressPercent)}%` }]} />
               </View>
-              <Text style={styles.progressPct}>{progressPercent}٪</Text>
+              <Text style={styles.progressPct}>{Math.min(100, progressPercent)}٪</Text>
               <Text style={styles.progressDetail}>
                 {progress.processed.toLocaleString('ar')} / {progress.total.toLocaleString('ar')}
               </Text>
+            </View>
+          ) : progress.status === 'uploading' ? (
+            <View style={styles.progressWrap}>
+              <ActivityIndicator color={Colors.primary} size="small" />
+              <Text style={styles.progressDetail}>جاري رفع جهات الاتصال...</Text>
             </View>
           ) : null}
 
