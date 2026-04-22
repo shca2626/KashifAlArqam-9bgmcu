@@ -16,11 +16,7 @@
         "foregroundImage": "./assets/images/logo.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true,
-      "permissions": [
-        "android.permission.READ_CONTACTS",
-        "android.permission.WRITE_CONTACTS"
-      ]
+      "edgeToEdgeEnabled": true
     },
     "web": {
       "bundler": "metro",
@@ -38,8 +34,7 @@
           "backgroundColor": "#ffffff"
         }
       ],
-      "expo-web-browser",
-      "expo-contacts"
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true

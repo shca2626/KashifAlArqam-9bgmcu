@@ -1,19 +1,17 @@
-// Powered by OnSpace.AI — SplashScreen with mandatory permission gate
-import React, { useEffect, useRef, useState } from 'react';
+// Powered by OnSpace.AI — SplashScreen
+import React, { useEffect, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Animated,
   Dimensions,
-  AppState,
-  AppStateStatus,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors, FontSize, FontWeight, Spacing } from '@/constants/theme';
-import { APP_CONFIG } from '@/constants/config';
-import * as Contacts from 'expo-contacts';
+import { APP_CONFIG, STORAGE_KEYS } from '@/constants/config';
 
 const { width } = Dimensions.get('window');
 
@@ -23,12 +21,9 @@ export default function SplashScreen() {
   const logoOpacity = useRef(new Animated.Value(0)).current;
   const logoScale = useRef(new Animated.Value(0.7)).current;
   const textOpacity = useRef(new Animated.Value(0)).current;
-  const [splashDone, setSplashDone] = useState(false);
-  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
-  const navigated = useRef(false);
 
   useEffect(() => {
-    // Animate splash in
+    // Animate in
     Animated.parallel([
       Animated.spring(logoScale, {
         toValue: 1,
@@ -50,50 +45,22 @@ export default function SplashScreen() {
       useNativeDriver: true,
     }).start();
 
-    // After splash animation, check permission and route
-    const timer = setTimeout(() => {
-      setSplashDone(true);
+    // Navigate after splash
+    const timer = setTimeout(async () => {
+      try {
+        const permAsked = await AsyncStorage.getItem(STORAGE_KEYS.permissionsAsked);
+        if (permAsked === 'true') {
+          router.replace('/home');
+        } else {
+          router.replace('/permissions');
+        }
+      } catch {
+        router.replace('/permissions');
+      }
     }, APP_CONFIG.splashDuration);
 
     return () => clearTimeout(timer);
   }, []);
-
-  useEffect(() => {
-    if (!splashDone) return;
-    checkAndRoute();
-  }, [splashDone]);
-
-  // Re-check permission when user returns from device settings
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', (nextState: AppStateStatus) => {
-      if (
-        appStateRef.current.match(/inactive|background/) &&
-        nextState === 'active' &&
-        splashDone
-      ) {
-        checkAndRoute();
-      }
-      appStateRef.current = nextState;
-    });
-    return () => sub.remove();
-  }, [splashDone]);
-
-  const checkAndRoute = async () => {
-    if (navigated.current) return;
-    try {
-      const { status } = await Contacts.getPermissionsAsync();
-      if (status === 'granted') {
-        navigated.current = true;
-        router.replace('/home');
-      } else {
-        // Not granted — send to mandatory permission screen
-        // Don't set navigated so we keep checking on return from settings
-        router.replace('/permissions');
-      }
-    } catch {
-      router.replace('/permissions');
-    }
-  };
 
   return (
     <View style={[styles.container, { paddingBottom: insets.bottom }]}>
