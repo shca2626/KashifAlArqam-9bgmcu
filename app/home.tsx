@@ -19,8 +19,14 @@ import { RecentSearch } from '@/types';
 import { STORAGE_KEYS } from '@/constants/config';
 import { useContactSync } from '@/hooks/useContactSync';
 import { getLastSyncAt } from '@/services/contactSyncService';
+import { getSupabaseClient } from '@/template';
 
 type SearchMode = 'auto' | 'number' | 'name';
+
+interface LiveStats {
+  totalNumbers: number;
+  totalContributors: number;
+}
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -30,6 +36,8 @@ export default function HomeScreen() {
   const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
   const [contactSyncEnabled, setContactSyncEnabled] = useState(false);
   const [lastSyncLabel, setLastSyncLabel] = useState<string | null>(null);
+  const [liveStats, setLiveStats] = useState<LiveStats | null>(null);
+  const [showImportGuide, setShowImportGuide] = useState(false);
 
   const { progress, isSyncing, showModal, startSync, dismissModal } = useContactSync();
 
@@ -54,6 +62,23 @@ export default function HomeScreen() {
           minute: '2-digit',
         })
       );
+    }
+    fetchLiveStats();
+  };
+
+  const fetchLiveStats = async () => {
+    try {
+      const supabase = getSupabaseClient();
+      const [numbersRes, contributorsRes] = await Promise.all([
+        supabase.from('phone_records').select('id', { count: 'exact', head: true }),
+        supabase.from('contributors').select('id', { count: 'exact', head: true }),
+      ]);
+      setLiveStats({
+        totalNumbers: numbersRes.count ?? 0,
+        totalContributors: contributorsRes.count ?? 0,
+      });
+    } catch {
+      // keep default static stats
     }
   };
 
@@ -193,14 +218,66 @@ export default function HomeScreen() {
 
         {/* Quick stats */}
         <View style={styles.statsRow}>
-          {STATS.map((s) => (
-            <View key={s.label} style={styles.statCard}>
-              <MaterialIcons name={s.icon} size={22} color={Colors.primary} />
-              <Text style={styles.statValue}>{s.value}</Text>
-              <Text style={styles.statLabel}>{s.label}</Text>
-            </View>
-          ))}
+          <View style={styles.statCard}>
+            <MaterialIcons name="people" size={22} color={Colors.primary} />
+            <Text style={styles.statValue}>
+              {liveStats
+                ? liveStats.totalNumbers >= 1000
+                  ? `${(liveStats.totalNumbers / 1000).toFixed(1)}ك`
+                  : String(liveStats.totalNumbers)
+                : '...'}
+            </Text>
+            <Text style={styles.statLabel}>رقم مسجل</Text>
+          </View>
+          <View style={styles.statCard}>
+            <MaterialIcons name="verified-user" size={22} color={Colors.primary} />
+            <Text style={styles.statValue}>٩٥٪</Text>
+            <Text style={styles.statLabel}>دقة التعرف</Text>
+          </View>
+          <View style={styles.statCard}>
+            <MaterialIcons name="group" size={22} color={Colors.primary} />
+            <Text style={styles.statValue}>
+              {liveStats
+                ? liveStats.totalContributors >= 1000
+                  ? `${(liveStats.totalContributors / 1000).toFixed(1)}ك`
+                  : String(liveStats.totalContributors)
+                : '...'}
+            </Text>
+            <Text style={styles.statLabel}>مساهم</Text>
+          </View>
         </View>
+
+        {/* CSV/vCard import guide */}
+        <Pressable
+          onPress={() => setShowImportGuide((v) => !v)}
+          style={({ pressed }) => [styles.importGuideHeader, pressed && { opacity: 0.8 }]}
+        >
+          <MaterialIcons
+            name={showImportGuide ? 'expand-less' : 'expand-more'}
+            size={20}
+            color={Colors.primary}
+          />
+          <Text style={styles.importGuideTitle}>كيفية مزامنة جهات الاتصال عبر الويب</Text>
+          <MaterialIcons name="upload-file" size={20} color={Colors.primary} />
+        </Pressable>
+        {showImportGuide ? (
+          <View style={styles.importGuideBody}>
+            <Text style={styles.importGuideNote}>
+              إذا كنت تستخدم المتصفح ولا تعمل المزامنة التلقائية، يمكنك استيراد ملف جهات الاتصال يدوياً:
+            </Text>
+            {IMPORT_STEPS.map((step, i) => (
+              <View key={i} style={styles.importStep}>
+                <View style={styles.importStepNum}>
+                  <Text style={styles.importStepNumText}>{i + 1}</Text>
+                </View>
+                <View style={styles.importStepContent}>
+                  <Text style={styles.importStepTitle}>{step.title}</Text>
+                  <Text style={styles.importStepDesc}>{step.desc}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : null}
 
         {/* Recent searches */}
         <SectionHeader
@@ -281,10 +358,23 @@ export default function HomeScreen() {
   );
 }
 
-const STATS = [
-  { icon: 'people' as const, value: '٢م+', label: 'رقم مسجل' },
-  { icon: 'verified-user' as const, value: '٩٥٪', label: 'دقة التعرف' },
-  { icon: 'update' as const, value: 'يومي', label: 'تحديث البيانات' },
+const IMPORT_STEPS = [
+  {
+    title: 'أندرويد (جهات الاتصال Google)',
+    desc: 'افتح contacts.google.com → المزيد → تصدير → اختر VCF → حفّظ الملف',
+  },
+  {
+    title: 'آيفون (iCloud)',
+    desc: 'افتح icloud.com/contacts → اختر الكل → إعدادات → تصدير VCard',
+  },
+  {
+    title: 'Gmail / بريد جوجل',
+    desc: 'افتح contacts.google.com → تصدير → تنسيق Google CSV → حفّظ',
+  },
+  {
+    title: 'ارفع الملف في التطبيق',
+    desc: 'اضغط زر "مزامنة" ثم اختر "استيراد ملف" وحدد ملف VCF أو CSV الذي حفّظته',
+  },
 ];
 
 const styles = StyleSheet.create({
@@ -484,6 +574,81 @@ const styles = StyleSheet.create({
   },
   removeBtn: {
     padding: 4,
+  },
+  importGuideHeader: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    backgroundColor: Colors.surface,
+    marginHorizontal: Spacing.lg,
+    marginTop: Spacing.md,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    gap: Spacing.sm,
+    borderWidth: 1,
+    borderColor: Colors.borderLight,
+  },
+  importGuideTitle: {
+    flex: 1,
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.semiBold,
+    color: Colors.primary,
+    textAlign: 'right',
+  },
+  importGuideBody: {
+    backgroundColor: Colors.surfaceAlt,
+    marginHorizontal: Spacing.lg,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    borderWidth: 1,
+    borderColor: Colors.borderLight,
+    borderTopWidth: 0,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+    gap: Spacing.sm,
+  },
+  importGuideNote: {
+    fontSize: FontSize.xs,
+    color: Colors.textSecondary,
+    textAlign: 'right',
+    lineHeight: 18,
+    marginBottom: Spacing.xs,
+  },
+  importStep: {
+    flexDirection: 'row-reverse',
+    alignItems: 'flex-start',
+    gap: Spacing.sm,
+  },
+  importStepNum: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: Colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 2,
+  },
+  importStepNumText: {
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.bold,
+    color: Colors.textOnPrimary,
+  },
+  importStepContent: {
+    flex: 1,
+    alignItems: 'flex-end',
+  },
+  importStepTitle: {
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.semiBold,
+    color: Colors.textPrimary,
+    textAlign: 'right',
+  },
+  importStepDesc: {
+    fontSize: FontSize.xs,
+    color: Colors.textMuted,
+    textAlign: 'right',
+    lineHeight: 17,
+    marginTop: 2,
   },
   tipWrap: {
     flexDirection: 'row-reverse',

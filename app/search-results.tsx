@@ -15,6 +15,7 @@ import { Colors, Spacing, Radius, FontSize, FontWeight, Shadow } from '@/constan
 import { SearchBar, ContactListItem, SectionHeader, EmptyState } from '@/components';
 import { searchByNumber, searchByName } from '@/services/lookupService';
 import { saveToContacts } from '@/utils/contactUtils';
+import { saveSearch } from '@/utils/historyStorage';
 import { LookupResultGroup } from '@/types';
 
 const PAGE_SIZE = 15;
@@ -48,6 +49,10 @@ export default function SearchResultsScreen() {
       setResults(res);
       setDisplayed(res.slice(0, PAGE_SIZE));
       setPage(1);
+      // Auto-save to search history
+      if (q.trim()) {
+        saveSearch({ query: q.trim(), type: mode, resultCount: res.length });
+      }
     } catch {
       setError('حدث خطأ أثناء البحث. يُرجى المحاولة مجدداً.');
     } finally {
