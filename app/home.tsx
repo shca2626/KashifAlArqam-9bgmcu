@@ -1,32 +1,32 @@
-// Powered by OnSpace.AI — HomeScreen with real contact sync
+// Powered by OnSpace.AI — HomeScreen: Search-focused mobile design
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Pressable,
-  ScrollView,
+  FlatList,
+  Animated,
+  TextInput,
+  Dimensions,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors, Spacing, Radius, FontSize, FontWeight, Shadow } from '@/constants/theme';
-import { SearchBar, SectionHeader, EmptyState, SyncProgressModal } from '@/components';
 import { getRecentSearches, clearHistory, removeHistoryItem } from '@/utils/historyStorage';
 import { isPhoneQuery } from '@/utils/phoneUtils';
 import { RecentSearch } from '@/types';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { STORAGE_KEYS } from '@/constants/config';
-import { useContactSync } from '@/hooks/useContactSync';
-import { getLastSyncAt } from '@/services/contactSyncService';
-import { getSupabaseClient } from '@/template';
+
+const { width } = Dimensions.get('window');
 
 type SearchMode = 'auto' | 'number' | 'name';
 
-interface LiveStats {
-  totalNumbers: number;
-  totalContributors: number;
-}
+const OWNER_UNLOCK_KEY = '@kashif_owner_unlocked';
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -34,67 +34,48 @@ export default function HomeScreen() {
   const [query, setQuery] = useState('');
   const [searchMode, setSearchMode] = useState<SearchMode>('auto');
   const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
-  const [contactSyncEnabled, setContactSyncEnabled] = useState(false);
-  const [lastSyncLabel, setLastSyncLabel] = useState<string | null>(null);
-  const [liveStats, setLiveStats] = useState<LiveStats | null>(null);
-  const [showImportGuide, setShowImportGuide] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
+  const [ownerTaps, setOwnerTaps] = useState(0);
+  const ownerTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const { progress, isSyncing, showModal, startSync, dismissModal } = useContactSync();
+  const inputRef = useRef<TextInput>(null);
+  const headerAnim = useRef(new Animated.Value(0)).current;
+  const fabAnim = useRef(new Animated.Value(0)).current;
+
+  useFocusEffect(
+    useCallback(() => {
+      loadRecents();
+    }, [])
+  );
 
   useEffect(() => {
-    loadData();
+    Animated.timing(headerAnim, {
+      toValue: 1,
+      duration: 500,
+      useNativeDriver: true,
+    }).start();
   }, []);
 
-  const loadData = async () => {
-    const [recent, syncVal, lastSync] = await Promise.all([
-      getRecentSearches(10),
-      AsyncStorage.getItem(STORAGE_KEYS.contactSyncEnabled),
-      getLastSyncAt(),
-    ]);
-    setRecentSearches(recent);
-    setContactSyncEnabled(syncVal === 'true');
-    if (lastSync) {
-      setLastSyncLabel(
-        new Date(lastSync).toLocaleDateString('ar-YE', {
-          day: 'numeric',
-          month: 'short',
-          hour: '2-digit',
-          minute: '2-digit',
-        })
-      );
-    }
-    fetchLiveStats();
-  };
-
-  const fetchLiveStats = async () => {
-    try {
-      const supabase = getSupabaseClient();
-      const [numbersRes, contributorsRes] = await Promise.all([
-        supabase.from('phone_records').select('id', { count: 'exact', head: true }),
-        supabase.from('contributors').select('id', { count: 'exact', head: true }),
-      ]);
-      setLiveStats({
-        totalNumbers: numbersRes.count ?? 0,
-        totalContributors: contributorsRes.count ?? 0,
-      });
-    } catch {
-      // keep default static stats
-    }
-  };
-
   useEffect(() => {
-    if (progress.status === 'done') {
-      loadData();
-    }
-  }, [progress.status]);
+    Animated.spring(fabAnim, {
+      toValue: query.trim().length > 0 ? 1 : 0,
+      tension: 100,
+      friction: 8,
+      useNativeDriver: true,
+    }).start();
+  }, [query]);
+
+  const loadRecents = async () => {
+    const recent = await getRecentSearches(12);
+    setRecentSearches(recent);
+  };
 
   const handleSearch = useCallback(() => {
     if (!query.trim()) return;
+    inputRef.current?.blur();
     const detectedMode =
       searchMode === 'auto'
-        ? isPhoneQuery(query)
-          ? 'number'
-          : 'name'
+        ? isPhoneQuery(query) ? 'number' : 'name'
         : searchMode;
     router.push({
       pathname: '/search-results',
@@ -103,7 +84,6 @@ export default function HomeScreen() {
   }, [query, searchMode, router]);
 
   const handleRecentPress = (item: RecentSearch) => {
-    setQuery(item.query);
     router.push({
       pathname: '/search-results',
       params: { query: item.query, mode: item.type },
@@ -120,261 +100,223 @@ export default function HomeScreen() {
     setRecentSearches((prev) => prev.filter((r) => r.id !== id));
   };
 
-  const handleSyncPress = () => {
-    startSync();
+  // Secret owner unlock: tap version 7 times quickly
+  const handleOwnerTap = async () => {
+    if (ownerTapTimer.current) clearTimeout(ownerTapTimer.current);
+    const next = ownerTaps + 1;
+    setOwnerTaps(next);
+    if (next >= 7) {
+      setOwnerTaps(0);
+      await AsyncStorage.setItem(OWNER_UNLOCK_KEY, 'true');
+      router.push('/analytics');
+    } else {
+      ownerTapTimer.current = setTimeout(() => setOwnerTaps(0), 2000);
+    }
   };
 
-  return (
-    <View style={[styles.root, { paddingTop: insets.top }]}>
-      {/* Sync Progress Modal */}
-      <SyncProgressModal
-        visible={showModal}
-        progress={progress}
-        onClose={dismissModal}
-      />
+  const renderRecentItem = ({ item }: { item: RecentSearch }) => (
+    <Pressable
+      onPress={() => handleRecentPress(item)}
+      style={({ pressed }) => [styles.recentItem, pressed && { opacity: 0.7 }]}
+    >
+      <View style={styles.recentLeft}>
+        <Pressable
+          onPress={() => handleRemoveItem(item.id)}
+          hitSlop={12}
+          style={({ pressed }) => [pressed && { opacity: 0.5 }]}
+        >
+          <MaterialIcons name="close" size={14} color={Colors.textMuted} />
+        </Pressable>
+      </View>
+      <View style={styles.recentCenter}>
+        <Text style={styles.recentQuery} numberOfLines={1}>{item.query}</Text>
+        {item.resultCount !== undefined ? (
+          <Text style={styles.recentMeta}>{item.resultCount} نتيجة · {item.type === 'number' ? 'رقم' : 'اسم'}</Text>
+        ) : null}
+      </View>
+      <View style={[styles.recentIcon, item.type === 'number' ? styles.recentIconNum : styles.recentIconName]}>
+        <MaterialIcons
+          name={item.type === 'number' ? 'dialpad' : 'person'}
+          size={16}
+          color={item.type === 'number' ? Colors.primary : Colors.accent}
+        />
+      </View>
+    </Pressable>
+  );
 
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.headerTop}>
+  return (
+    <KeyboardAvoidingView
+      style={styles.root}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
+      {/* ── Header ── */}
+      <Animated.View
+        style={[
+          styles.header,
+          { paddingTop: insets.top + Spacing.md, opacity: headerAnim },
+        ]}
+      >
+        {/* Top bar */}
+        <View style={styles.topBar}>
+          <Pressable
+            onPress={() => router.push('/settings')}
+            style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.6 }]}
+          >
+            <MaterialIcons name="settings" size={22} color={Colors.textOnPrimary} />
+          </Pressable>
+
+          <Pressable onPress={handleOwnerTap} style={styles.logoWrap}>
+            <View style={styles.logoIcon}>
+              <MaterialIcons name="search" size={20} color={Colors.primary} />
+            </View>
+            <Text style={styles.logoText}>كاشف الأرقام</Text>
+          </Pressable>
+
           <Pressable
             onPress={() => router.push('/moderation')}
-            hitSlop={8}
-            style={({ pressed }) => [styles.headerIcon, pressed && { opacity: 0.6 }]}
+            style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.6 }]}
           >
             <MaterialIcons name="tune" size={22} color={Colors.textOnPrimary} />
           </Pressable>
-          <Text style={styles.headerTitle}>كاشف الارقام</Text>
-          <View style={styles.headerIcon} />
         </View>
 
-        <Text style={styles.headerSub}>ابحث عن أي رقم أو اسم في اليمن</Text>
+        <Text style={styles.headerTagline}>ابحث عن أي رقم أو اسم في اليمن</Text>
 
-        {/* Search bar */}
-        <View style={styles.searchWrap}>
-          <SearchBar
+        {/* ── Search Box ── */}
+        <View style={styles.searchBox}>
+          <Pressable
+            onPress={handleSearch}
+            style={({ pressed }) => [styles.searchActionBtn, pressed && { opacity: 0.7 }]}
+          >
+            <MaterialIcons name="search" size={22} color={Colors.primary} />
+          </Pressable>
+
+          <TextInput
+            ref={inputRef}
+            style={styles.searchInput}
+            placeholder="ابحث برقم الهاتف أو الاسم..."
+            placeholderTextColor={Colors.textMuted}
             value={query}
             onChangeText={setQuery}
-            onSubmit={handleSearch}
-            onClear={() => setQuery('')}
+            onSubmitEditing={handleSearch}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => setIsFocused(false)}
+            returnKeyType="search"
+            textAlign="right"
+            textAlignVertical="center"
           />
+
+          {query.length > 0 ? (
+            <Pressable
+              onPress={() => setQuery('')}
+              hitSlop={8}
+              style={styles.clearBtn}
+            >
+              <MaterialIcons name="close" size={18} color={Colors.textMuted} />
+            </Pressable>
+          ) : null}
         </View>
 
-        {/* Search mode tabs */}
-        <View style={styles.modeTabs}>
-          {(['auto', 'number', 'name'] as SearchMode[]).map((mode) => (
+        {/* ── Mode pills ── */}
+        <View style={styles.modePills}>
+          {((['auto', 'number', 'name'] as SearchMode[])).map((m) => (
             <Pressable
-              key={mode}
-              onPress={() => setSearchMode(mode)}
-              style={[styles.modeTab, searchMode === mode && styles.modeTabActive]}
+              key={m}
+              onPress={() => setSearchMode(m)}
+              style={[styles.modePill, searchMode === m && styles.modePillActive]}
             >
               <MaterialIcons
-                name={mode === 'auto' ? 'auto-awesome' : mode === 'number' ? 'dialpad' : 'person-search'}
-                size={14}
-                color={searchMode === mode ? Colors.primary : 'rgba(255,255,255,0.8)'}
+                name={m === 'auto' ? 'auto-awesome' : m === 'number' ? 'dialpad' : 'person-search'}
+                size={13}
+                color={searchMode === m ? Colors.primary : 'rgba(255,255,255,0.75)'}
               />
-              <Text style={[styles.modeTabText, searchMode === mode && styles.modeTabTextActive]}>
-                {mode === 'auto' ? 'تلقائي' : mode === 'number' ? 'رقم' : 'اسم'}
+              <Text style={[styles.modePillText, searchMode === m && styles.modePillTextActive]}>
+                {m === 'auto' ? 'تلقائي' : m === 'number' ? 'رقم' : 'اسم'}
               </Text>
             </Pressable>
           ))}
         </View>
-      </View>
+      </Animated.View>
 
-      <ScrollView style={styles.body} showsVerticalScrollIndicator={false}>
-        {/* Sync contacts card */}
-        <View style={styles.syncCard}>
-          <View style={styles.syncCardInfo}>
-            <MaterialIcons
-              name={contactSyncEnabled ? 'sync' : 'group-add'}
-              size={28}
-              color={Colors.primary}
-            />
-            <View style={styles.syncCardText}>
-              <Text style={styles.syncCardTitle}>
-                {contactSyncEnabled ? 'مزامنة جهات الاتصال' : 'ساهم في تحسين البيانات'}
-              </Text>
-              <Text style={styles.syncCardSub}>
-                {contactSyncEnabled
-                  ? lastSyncLabel
-                    ? `آخر مزامنة: ${lastSyncLabel}`
-                    : 'لم تتم المزامنة بعد'
-                  : 'شارك جهات اتصالك لمساعدة الآخرين'}
-              </Text>
-            </View>
-          </View>
-          <Pressable
-            onPress={handleSyncPress}
-            disabled={isSyncing}
-            style={({ pressed }) => [
-              styles.syncBtn,
-              isSyncing && styles.syncBtnDisabled,
-              pressed && !isSyncing && { opacity: 0.8 },
-            ]}
-          >
-            <MaterialIcons name="cloud-upload" size={16} color={Colors.textOnPrimary} />
-            <Text style={styles.syncBtnText}>{isSyncing ? 'جاري...' : 'مزامنة'}</Text>
-          </Pressable>
+      {/* ── Body ── */}
+      <View style={styles.body}>
+        {/* Section header */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>
+            {recentSearches.length > 0 ? 'عمليات البحث الأخيرة' : 'ابدأ البحث'}
+          </Text>
+          {recentSearches.length > 0 ? (
+            <Pressable onPress={handleClearHistory} hitSlop={8}>
+              <Text style={styles.clearAllText}>مسح الكل</Text>
+            </Pressable>
+          ) : null}
         </View>
-
-        {/* Quick stats */}
-        <View style={styles.statsRow}>
-          <View style={styles.statCard}>
-            <MaterialIcons name="people" size={22} color={Colors.primary} />
-            <Text style={styles.statValue}>
-              {liveStats
-                ? liveStats.totalNumbers >= 1000
-                  ? `${(liveStats.totalNumbers / 1000).toFixed(1)}ك`
-                  : String(liveStats.totalNumbers)
-                : '...'}
-            </Text>
-            <Text style={styles.statLabel}>رقم مسجل</Text>
-          </View>
-          <View style={styles.statCard}>
-            <MaterialIcons name="verified-user" size={22} color={Colors.primary} />
-            <Text style={styles.statValue}>٩٥٪</Text>
-            <Text style={styles.statLabel}>دقة التعرف</Text>
-          </View>
-          <View style={styles.statCard}>
-            <MaterialIcons name="group" size={22} color={Colors.primary} />
-            <Text style={styles.statValue}>
-              {liveStats
-                ? liveStats.totalContributors >= 1000
-                  ? `${(liveStats.totalContributors / 1000).toFixed(1)}ك`
-                  : String(liveStats.totalContributors)
-                : '...'}
-            </Text>
-            <Text style={styles.statLabel}>مساهم</Text>
-          </View>
-        </View>
-
-        {/* CSV/vCard import guide */}
-        <Pressable
-          onPress={() => setShowImportGuide((v) => !v)}
-          style={({ pressed }) => [styles.importGuideHeader, pressed && { opacity: 0.8 }]}
-        >
-          <MaterialIcons
-            name={showImportGuide ? 'expand-less' : 'expand-more'}
-            size={20}
-            color={Colors.primary}
-          />
-          <Text style={styles.importGuideTitle}>كيفية مزامنة جهات الاتصال عبر الويب</Text>
-          <MaterialIcons name="upload-file" size={20} color={Colors.primary} />
-        </Pressable>
-        {showImportGuide ? (
-          <View style={styles.importGuideBody}>
-            <Text style={styles.importGuideNote}>
-              إذا كنت تستخدم المتصفح ولا تعمل المزامنة التلقائية، يمكنك استيراد ملف جهات الاتصال يدوياً:
-            </Text>
-            {IMPORT_STEPS.map((step, i) => (
-              <View key={i} style={styles.importStep}>
-                <View style={styles.importStepNum}>
-                  <Text style={styles.importStepNumText}>{i + 1}</Text>
-                </View>
-                <View style={styles.importStepContent}>
-                  <Text style={styles.importStepTitle}>{step.title}</Text>
-                  <Text style={styles.importStepDesc}>{step.desc}</Text>
-                </View>
-              </View>
-            ))}
-          </View>
-        ) : null}
-
-        {/* Recent searches */}
-        <SectionHeader
-          title="البحث الأخير"
-          subtitle={recentSearches.length > 0 ? `${recentSearches.length} عملية` : undefined}
-          actionLabel={recentSearches.length > 0 ? 'مسح الكل' : undefined}
-          onAction={handleClearHistory}
-        />
 
         {recentSearches.length === 0 ? (
-          <EmptyState
-            icon="history"
-            title="لا يوجد بحث سابق"
-            description="ستظهر هنا عمليات البحث الأخيرة"
-          />
+          <View style={styles.emptyState}>
+            <View style={styles.emptyIconCircle}>
+              <MaterialIcons name="manage-search" size={40} color={Colors.primary} />
+            </View>
+            <Text style={styles.emptyTitle}>لا يوجد بحث سابق</Text>
+            <Text style={styles.emptyDesc}>
+              اكتب رقم هاتف أو اسم في خانة البحث أعلاه
+            </Text>
+            <View style={styles.quickTips}>
+              {QUICK_TIPS.map((tip, i) => (
+                <View key={i} style={styles.tipRow}>
+                  <MaterialIcons name={tip.icon} size={16} color={Colors.primary} />
+                  <Text style={styles.tipText}>{tip.text}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
         ) : (
-          recentSearches.map((item) => (
-            <Pressable
-              key={item.id}
-              onPress={() => handleRecentPress(item)}
-              style={({ pressed }) => [styles.recentItem, pressed && { opacity: 0.75 }]}
-            >
-              <Pressable
-                onPress={() => handleRemoveItem(item.id)}
-                hitSlop={8}
-                style={({ pressed }) => [styles.removeBtn, pressed && { opacity: 0.5 }]}
-              >
-                <MaterialIcons name="close" size={14} color={Colors.textMuted} />
-              </Pressable>
-
-              <View style={styles.recentContent}>
-                <Text style={styles.recentQuery}>{item.query}</Text>
-                {item.resultCount !== undefined ? (
-                  <Text style={styles.recentCount}>{item.resultCount} نتيجة</Text>
-                ) : null}
-              </View>
-
-              <View
-                style={[
-                  styles.recentTypeIcon,
-                  item.type === 'number' ? styles.recentTypeNum : styles.recentTypeName,
-                ]}
-              >
-                <MaterialIcons
-                  name={item.type === 'number' ? 'dialpad' : 'person'}
-                  size={16}
-                  color={item.type === 'number' ? Colors.primary : Colors.accent}
-                />
-              </View>
-            </Pressable>
-          ))
+          <FlatList
+            data={recentSearches}
+            keyExtractor={(item) => item.id}
+            renderItem={renderRecentItem}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
+            ItemSeparatorComponent={() => <View style={styles.separator} />}
+          />
         )}
+      </View>
 
-        {/* Tip */}
-        <View style={styles.tipWrap}>
-          <MaterialIcons name="lightbulb-outline" size={16} color={Colors.textMuted} />
-          <Text style={styles.tipText}>
-            يمكنك البحث بالاسم الكامل أو جزء منه أو رقم الهاتف مباشرةً
-          </Text>
-        </View>
-      </ScrollView>
-
-      {/* Search FAB */}
-      {query.trim().length > 0 ? (
+      {/* ── Search FAB ── */}
+      <Animated.View
+        style={[
+          styles.fab,
+          {
+            bottom: insets.bottom + 90,
+            transform: [
+              {
+                translateY: fabAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [80, 0],
+                }),
+              },
+              { scale: fabAnim },
+            ],
+            opacity: fabAnim,
+          },
+        ]}
+      >
         <Pressable
           onPress={handleSearch}
-          style={({ pressed }) => [
-            styles.fab,
-            { bottom: insets.bottom + 24 },
-            pressed && { transform: [{ scale: 0.93 }] },
-          ]}
+          style={({ pressed }) => [styles.fabBtn, pressed && { transform: [{ scale: 0.94 }] }]}
         >
-          <MaterialIcons name="search" size={24} color={Colors.textOnPrimary} />
-          <Text style={styles.fabText}>بحث</Text>
+          <MaterialIcons name="search" size={22} color={Colors.textOnPrimary} />
+          <Text style={styles.fabText}>بحث الآن</Text>
         </Pressable>
-      ) : null}
-    </View>
+      </Animated.View>
+    </KeyboardAvoidingView>
   );
 }
 
-const IMPORT_STEPS = [
-  {
-    title: 'أندرويد (جهات الاتصال Google)',
-    desc: 'افتح contacts.google.com → المزيد → تصدير → اختر VCF → حفّظ الملف',
-  },
-  {
-    title: 'آيفون (iCloud)',
-    desc: 'افتح icloud.com/contacts → اختر الكل → إعدادات → تصدير VCard',
-  },
-  {
-    title: 'Gmail / بريد جوجل',
-    desc: 'افتح contacts.google.com → تصدير → تنسيق Google CSV → حفّظ',
-  },
-  {
-    title: 'ارفع الملف في التطبيق',
-    desc: 'اضغط زر "مزامنة" ثم اختر "استيراد ملف" وحدد ملف VCF أو CSV الذي حفّظته',
-  },
+const QUICK_TIPS = [
+  { icon: 'dialpad' as const, text: 'ابحث بالرقم: 777123456' },
+  { icon: 'person' as const, text: 'ابحث بالاسم: محمد أحمد' },
+  { icon: 'info-outline' as const, text: 'يمكنك كتابة جزء من الاسم' },
 ];
 
 const styles = StyleSheet.create({
@@ -382,182 +324,149 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
+  // ── Header ──
   header: {
     backgroundColor: Colors.primary,
-    paddingTop: Spacing.sm,
-    paddingBottom: Spacing.xxl,
+    paddingHorizontal: Spacing.lg,
+    paddingBottom: Spacing.xxl + 8,
   },
-  headerTop: {
+  topBar: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.sm,
+    marginBottom: Spacing.md,
   },
-  headerTitle: {
-    fontSize: FontSize.xl,
-    fontWeight: FontWeight.bold,
-    color: Colors.textOnPrimary,
-  },
-  headerIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+  iconBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     backgroundColor: 'rgba(255,255,255,0.12)',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  headerSub: {
-    fontSize: FontSize.sm,
-    color: 'rgba(255,255,255,0.75)',
-    textAlign: 'center',
-    marginBottom: Spacing.sm,
-  },
-  searchWrap: {
-    marginHorizontal: Spacing.sm,
-  },
-  modeTabs: {
-    flexDirection: 'row-reverse',
-    justifyContent: 'center',
-    paddingHorizontal: Spacing.lg,
-    gap: Spacing.sm,
-    marginTop: Spacing.sm,
-  },
-  modeTab: {
+  logoWrap: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    gap: 6,
+    gap: Spacing.sm,
+  },
+  logoIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: Colors.textOnPrimary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  logoText: {
+    fontSize: FontSize.lg,
+    fontWeight: FontWeight.bold,
+    color: Colors.textOnPrimary,
+    letterSpacing: 0.3,
+  },
+  headerTagline: {
+    fontSize: FontSize.sm,
+    color: 'rgba(255,255,255,0.65)',
+    textAlign: 'center',
+    marginBottom: Spacing.md,
+  },
+  // ── Search box ──
+  searchBox: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    backgroundColor: Colors.textOnPrimary,
+    borderRadius: Radius.xl,
     paddingHorizontal: Spacing.md,
-    paddingVertical: 8,
+    height: 54,
+    gap: Spacing.sm,
+    ...Shadow.md,
+  },
+  searchActionBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.surfaceAlt,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: FontSize.base,
+    color: Colors.textPrimary,
+    paddingVertical: 0,
+    includeFontPadding: false,
+  },
+  clearBtn: {
+    padding: 4,
+  },
+  // ── Mode pills ──
+  modePills: {
+    flexDirection: 'row-reverse',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
+  },
+  modePill: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 7,
     borderRadius: Radius.full,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.3)',
+    borderColor: 'rgba(255,255,255,0.25)',
   },
-  modeTabActive: {
-    backgroundColor: Colors.surface,
+  modePillActive: {
+    backgroundColor: Colors.textOnPrimary,
   },
-  modeTabText: {
+  modePillText: {
     fontSize: FontSize.sm,
     color: 'rgba(255,255,255,0.8)',
     fontWeight: FontWeight.medium,
   },
-  modeTabTextActive: {
+  modePillTextActive: {
     color: Colors.primary,
     fontWeight: FontWeight.bold,
   },
+  // ── Body ──
   body: {
     flex: 1,
-    marginTop: -Spacing.lg,
+    marginTop: -16,
     borderTopLeftRadius: Radius.xl,
     borderTopRightRadius: Radius.xl,
     backgroundColor: Colors.background,
+    overflow: 'hidden',
   },
-  syncCard: {
+  sectionHeader: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    backgroundColor: Colors.surface,
-    marginHorizontal: Spacing.lg,
-    marginTop: Spacing.xl,
-    borderRadius: Radius.lg,
-    padding: Spacing.md,
-    gap: Spacing.sm,
-    ...Shadow.sm,
-    borderWidth: 1,
-    borderColor: Colors.borderLight,
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.xl,
+    paddingBottom: Spacing.md,
   },
-  syncCardInfo: {
-    flex: 1,
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    gap: Spacing.sm,
-  },
-  syncCardText: {
-    flex: 1,
-    alignItems: 'flex-end',
-  },
-  syncCardTitle: {
-    fontSize: FontSize.sm,
-    fontWeight: FontWeight.semiBold,
+  sectionTitle: {
+    fontSize: FontSize.base,
+    fontWeight: FontWeight.bold,
     color: Colors.textPrimary,
-    textAlign: 'right',
   },
-  syncCardSub: {
-    fontSize: FontSize.xs,
-    color: Colors.textMuted,
-    textAlign: 'right',
-    marginTop: 2,
-  },
-  syncBtn: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: Colors.accent,
-    borderRadius: Radius.full,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 8,
-  },
-  syncBtnDisabled: {
-    backgroundColor: Colors.textMuted,
-  },
-  syncBtnText: {
+  clearAllText: {
     fontSize: FontSize.sm,
-    fontWeight: FontWeight.bold,
-    color: Colors.textOnPrimary,
+    color: Colors.error,
+    fontWeight: FontWeight.semiBold,
   },
-  statsRow: {
-    flexDirection: 'row-reverse',
-    marginHorizontal: Spacing.lg,
-    marginTop: Spacing.md,
-    gap: Spacing.sm,
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.lg,
-    padding: Spacing.md,
-    alignItems: 'center',
-    gap: 4,
-    ...Shadow.sm,
-    borderWidth: 1,
-    borderColor: Colors.borderLight,
-  },
-  statValue: {
-    fontSize: FontSize.lg,
-    fontWeight: FontWeight.bold,
-    color: Colors.primary,
-  },
-  statLabel: {
-    fontSize: FontSize.xs,
-    color: Colors.textSecondary,
-    textAlign: 'center',
-  },
+  // ── Recent items ──
   recentItem: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    backgroundColor: Colors.surface,
-    marginHorizontal: Spacing.lg,
-    marginBottom: Spacing.xs,
-    borderRadius: Radius.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
     gap: Spacing.sm,
-    borderWidth: 1,
-    borderColor: Colors.borderLight,
   },
-  recentTypeIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: Radius.sm,
-    justifyContent: 'center',
+  recentLeft: {
+    width: 28,
     alignItems: 'center',
   },
-  recentTypeNum: {
-    backgroundColor: '#EEF0F8',
-  },
-  recentTypeName: {
-    backgroundColor: '#EFF8F2',
-  },
-  recentContent: {
+  recentCenter: {
     flex: 1,
     alignItems: 'flex-end',
   },
@@ -567,116 +476,88 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     textAlign: 'right',
   },
-  recentCount: {
+  recentMeta: {
     fontSize: FontSize.xs,
     color: Colors.textMuted,
     marginTop: 2,
-  },
-  removeBtn: {
-    padding: 4,
-  },
-  importGuideHeader: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    backgroundColor: Colors.surface,
-    marginHorizontal: Spacing.lg,
-    marginTop: Spacing.md,
-    borderRadius: Radius.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    gap: Spacing.sm,
-    borderWidth: 1,
-    borderColor: Colors.borderLight,
-  },
-  importGuideTitle: {
-    flex: 1,
-    fontSize: FontSize.sm,
-    fontWeight: FontWeight.semiBold,
-    color: Colors.primary,
     textAlign: 'right',
   },
-  importGuideBody: {
-    backgroundColor: Colors.surfaceAlt,
-    marginHorizontal: Spacing.lg,
-    borderRadius: Radius.md,
-    padding: Spacing.md,
-    borderWidth: 1,
-    borderColor: Colors.borderLight,
-    borderTopWidth: 0,
-    borderTopLeftRadius: 0,
-    borderTopRightRadius: 0,
-    gap: Spacing.sm,
-  },
-  importGuideNote: {
-    fontSize: FontSize.xs,
-    color: Colors.textSecondary,
-    textAlign: 'right',
-    lineHeight: 18,
-    marginBottom: Spacing.xs,
-  },
-  importStep: {
-    flexDirection: 'row-reverse',
-    alignItems: 'flex-start',
-    gap: Spacing.sm,
-  },
-  importStepNum: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: Colors.primary,
+  recentIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: Radius.sm,
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 2,
   },
-  importStepNumText: {
-    fontSize: FontSize.xs,
-    fontWeight: FontWeight.bold,
-    color: Colors.textOnPrimary,
-  },
-  importStepContent: {
-    flex: 1,
-    alignItems: 'flex-end',
-  },
-  importStepTitle: {
-    fontSize: FontSize.sm,
-    fontWeight: FontWeight.semiBold,
-    color: Colors.textPrimary,
-    textAlign: 'right',
-  },
-  importStepDesc: {
-    fontSize: FontSize.xs,
-    color: Colors.textMuted,
-    textAlign: 'right',
-    lineHeight: 17,
-    marginTop: 2,
-  },
-  tipWrap: {
-    flexDirection: 'row-reverse',
-    alignItems: 'flex-start',
+  recentIconNum: { backgroundColor: '#EEF0F8' },
+  recentIconName: { backgroundColor: '#EFF8F2' },
+  separator: {
+    height: 1,
+    backgroundColor: Colors.divider,
     marginHorizontal: Spacing.lg,
-    marginTop: Spacing.lg,
-    marginBottom: Spacing.xxxl,
-    gap: Spacing.sm,
+  },
+  // ── Empty state ──
+  emptyState: {
+    flex: 1,
+    alignItems: 'center',
+    paddingTop: Spacing.section,
+    paddingHorizontal: Spacing.xxl,
+    gap: Spacing.md,
+  },
+  emptyIconCircle: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
     backgroundColor: Colors.surfaceAlt,
-    borderRadius: Radius.md,
-    padding: Spacing.md,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: Spacing.sm,
+  },
+  emptyTitle: {
+    fontSize: FontSize.xl,
+    fontWeight: FontWeight.bold,
+    color: Colors.textPrimary,
+    textAlign: 'center',
+  },
+  emptyDesc: {
+    fontSize: FontSize.base,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  quickTips: {
+    marginTop: Spacing.lg,
+    gap: Spacing.md,
+    width: '100%',
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.lg,
+    padding: Spacing.lg,
+    borderWidth: 1,
+    borderColor: Colors.borderLight,
+  },
+  tipRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: Spacing.sm,
   },
   tipText: {
-    flex: 1,
     fontSize: FontSize.sm,
-    color: Colors.textMuted,
+    color: Colors.textSecondary,
     textAlign: 'right',
-    lineHeight: 20,
+    flex: 1,
   },
+  // ── FAB ──
   fab: {
     position: 'absolute',
-    right: Spacing.lg,
+    alignSelf: 'center',
+  },
+  fabBtn: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: Spacing.sm,
     backgroundColor: Colors.primary,
     borderRadius: Radius.full,
-    paddingHorizontal: Spacing.xl,
+    paddingHorizontal: Spacing.xxl,
     paddingVertical: Spacing.md,
     ...Shadow.lg,
   },

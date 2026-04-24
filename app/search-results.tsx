@@ -105,7 +105,7 @@ export default function SearchResultsScreen() {
         onSave={handleSave}
       />
     ),
-    []
+    [handleItemPress, handleSave]
   );
 
   const keyExtractor = useCallback((item: LookupResultGroup) => item.id, []);
@@ -216,16 +216,8 @@ export default function SearchResultsScreen() {
         />
       )}
 
-      {/* Premium banner */}
-      {!isLoading && results.length > 0 ? (
-        <View style={[styles.premiumBanner, { marginBottom: insets.bottom + Spacing.lg }]}>
-          <MaterialIcons name="star" size={28} color="rgba(255,255,255,0.8)" />
-          <View style={styles.premiumText}>
-            <Text style={styles.premiumTitle}>اكشف المزيد من التفاصيل</Text>
-            <Text style={styles.premiumSub}>احصل على عضوية بريميوم لمعرفة المزيد عن هذا الرقم</Text>
-          </View>
-        </View>
-      ) : null}
+      {/* Bottom safe area spacer */}
+      <View style={{ height: insets.bottom }} />
     </View>
   );
 }
@@ -331,31 +323,5 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     color: Colors.primary,
     fontWeight: FontWeight.semiBold,
-  },
-  premiumBanner: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    backgroundColor: Colors.primary,
-    marginHorizontal: Spacing.lg,
-    borderRadius: Radius.lg,
-    padding: Spacing.lg,
-    gap: Spacing.md,
-    ...Shadow.md,
-  },
-  premiumText: {
-    flex: 1,
-    alignItems: 'flex-end',
-  },
-  premiumTitle: {
-    fontSize: FontSize.base,
-    fontWeight: FontWeight.bold,
-    color: Colors.textOnPrimary,
-    textAlign: 'right',
-  },
-  premiumSub: {
-    fontSize: FontSize.xs,
-    color: 'rgba(255,255,255,0.7)',
-    textAlign: 'right',
-    marginTop: 2,
   },
 });
