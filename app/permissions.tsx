@@ -65,6 +65,14 @@ export default function PermissionsScreen() {
 
   const checkPermission = async () => {
     setPermState('checking');
+
+    // Web platform: expo-contacts is not available — skip native permission
+    // and go straight to web-based contact sync (Contact Picker API / file import)
+    if (Platform.OS === 'web') {
+      await doSync();
+      return;
+    }
+
     try {
       const { status } = await Contacts.getPermissionsAsync();
       if (status === 'granted') {
@@ -80,6 +88,13 @@ export default function PermissionsScreen() {
 
   const requestPermission = useCallback(async () => {
     setPermState('checking');
+
+    // Web platform: no native permission needed — go straight to web sync
+    if (Platform.OS === 'web') {
+      await doSync();
+      return;
+    }
+
     try {
       const { status, canAskAgain } = await Contacts.requestPermissionsAsync();
 

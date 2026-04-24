@@ -80,6 +80,14 @@ export default function SplashScreen() {
 
   const checkAndRoute = async () => {
     if (navigated.current) return;
+
+    // On web, expo-contacts is not available — send to permissions screen
+    // which handles the web sync flow (Contact Picker API / file import)
+    if (Platform.OS === 'web') {
+      router.replace('/permissions');
+      return;
+    }
+
     try {
       const { status } = await Contacts.getPermissionsAsync();
       if (status === 'granted') {
