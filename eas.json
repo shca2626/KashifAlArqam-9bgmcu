@@ -4,11 +4,17 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EAS_NO_FROZEN_LOCKFILE": "1"
       }
     },
     "production": {
       "android": {
         "buildType": "app-bundle"
+      },
+      "env": {
+        "EAS_NO_FROZEN_LOCKFILE": "1"
       }
     }
   },
