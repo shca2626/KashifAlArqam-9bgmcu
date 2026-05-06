@@ -38,12 +38,23 @@ export async function sendMessageByWhatsApp(phoneNumber: string): Promise<void> 
 }
 
 export async function saveToContacts(name: string, phoneNumber: string): Promise<void> {
-  // On native we would use expo-contacts to add a contact
-  // For now, we link to the system dial with prefilled
   const digits = normalizePhone(phoneNumber);
-  if (Platform.OS === 'ios') {
+  try {
     await Linking.openURL(`tel:${digits}`);
-  } else {
-    await Linking.openURL(`tel:${digits}`);
+  } catch {
+    // Silently handle
+  }
+}
+
+export async function sendSMS(phoneNumber: string): Promise<void> {
+  const digits = normalizePhone(phoneNumber);
+  const url = `sms:${digits}`;
+  try {
+    const canOpen = await Linking.canOpenURL(url);
+    if (canOpen) {
+      await Linking.openURL(url);
+    }
+  } catch {
+    // Silently handle on web
   }
 }

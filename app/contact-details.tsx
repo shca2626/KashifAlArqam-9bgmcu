@@ -17,7 +17,8 @@ import { useAlert } from '@/template';
 import { Colors, Spacing, Radius, FontSize, FontWeight, Shadow } from '@/constants/theme';
 import { Avatar, FrequencyBadge } from '@/components';
 import { searchByNumber, reportName } from '@/services/lookupService';
-import { callNumber, sendMessageByWhatsApp, saveToContacts } from '@/utils/contactUtils';
+import { callNumber, sendMessageByWhatsApp, sendSMS } from '@/utils/contactUtils';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { hideNumber, hideName } from '@/utils/moderationStorage';
 import { formatPhoneDisplay } from '@/utils/phoneUtils';
 import { LookupResultGroup } from '@/types';
@@ -205,15 +206,15 @@ export default function ContactDetailsScreen() {
             onPress={() => sendMessageByWhatsApp(group.phoneNumber)}
             style={({ pressed }) => [styles.qaBtn, styles.qaBtnWa, pressed && { opacity: 0.8 }]}
           >
-            <MaterialIcons name="chat" size={20} color={Colors.textOnPrimary} />
+            <MaterialCommunityIcons name="whatsapp" size={22} color={Colors.textOnPrimary} />
             <Text style={styles.qaBtnText}>واتساب</Text>
           </Pressable>
           <Pressable
-            onPress={() => saveToContacts(group.topLabel, group.phoneNumber)}
+            onPress={() => sendSMS(group.phoneNumber)}
             style={({ pressed }) => [styles.qaBtn, styles.qaBtnSave, pressed && { opacity: 0.8 }]}
           >
-            <MaterialIcons name="person-add" size={20} color={Colors.primary} />
-            <Text style={[styles.qaBtnText, { color: Colors.primary }]}>حفظ</Text>
+            <MaterialIcons name="sms" size={20} color={Colors.primary} />
+            <Text style={[styles.qaBtnText, { color: Colors.primary }]}>رسالة</Text>
           </Pressable>
         </View>
 
